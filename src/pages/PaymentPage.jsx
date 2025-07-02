@@ -1,17 +1,31 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../hooks/useAuth';
 import SafeIcon from '../common/SafeIcon';
 import supabase from '../lib/supabase';
 import * as FiIcons from 'react-icons/fi';
 
-const { FiCreditCard, FiSmartphone, FiCheck, FiLoader, FiAlertCircle } = FiIcons;
+const {
+  FiCreditCard,
+  FiSmartphone,
+  FiCheck,
+  FiLoader,
+  FiAlertCircle,
+  FiExternalLink,
+  FiRefreshCw,
+  FiX
+} = FiIcons;
 
 const PaymentPage = () => {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const [paymentMethod, setPaymentMethod] = useState('momo');
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState(null);
+  const [paymentRef, setPaymentRef] = useState(null);
+  const [checkoutUri, setCheckoutUri] = useState(null);
+  const [pollingInterval, setPollingInterval] = useState(null);
   const [formData, setFormData] = useState({
     amount: '',
     phone: '',
@@ -25,6 +39,15 @@ const PaymentPage = () => {
     { id: 'airtel', name: 'Airtel Money', color: 'bg-red-500', flag: '📡' }
   ];
 
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -36,36 +59,127 @@ const PaymentPage = () => {
     setPaymentStatus(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('mobile-money', {
-        body: {
+      // Get user session token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('Authentication required');
+      }
+
+      // Call mobile money function
+      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/mobile-money/pay`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'apikey': supabase.supabaseKey
+        },
+        body: JSON.stringify({
+          userId: user.id,
           amount: parseFloat(formData.amount),
-          currency: 'USD',
-          phone: formData.phone,
           provider: formData.provider,
-          reference: `EMIRAFRIK_${Date.now()}`,
+          phone: formData.phone,
+          currency: 'USD',
           description: formData.description
-        }
+        })
       });
 
-      if (error) throw error;
+      const result = await response.json();
 
-      setPaymentStatus({
-        type: 'success',
-        message: data.message,
-        transaction: data.transaction
-      });
+      if (!response.ok) {
+        throw new Error(result.error || 'Payment initiation failed');
+      }
+
+      if (result.success) {
+        setPaymentRef(result.payment_ref);
+        setCheckoutUri(result.checkout_uri);
+        setPaymentStatus({
+          type: 'initiated',
+          message: result.message,
+          payment_ref: result.payment_ref
+        });
+
+        // Start polling for payment status
+        startPolling(result.payment_ref);
+      } else {
+        throw new Error(result.error || 'Payment failed');
+      }
 
     } catch (error) {
       console.error('Payment error:', error);
       setPaymentStatus({
         type: 'error',
-        message: 'Payment failed. Please try again.'
+        message: error.message || 'Payment failed. Please try again.'
       });
     } finally {
       setIsProcessing(false);
     }
   };
 
+  const startPolling = (paymentRef) => {
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(
+          `${supabase.supabaseUrl}/functions/v1/mobile-money/status?payment_ref=${paymentRef}&user_id=${user.id}`,
+          {
+            headers: {
+              'apikey': supabase.supabaseKey
+            }
+          }
+        );
+
+        const result = await response.json();
+
+        if (response.ok && result.status) {
+          if (result.status === 'paid') {
+            setPaymentStatus({
+              type: 'success',
+              message: 'Payment completed successfully!',
+              transaction: result
+            });
+            clearInterval(interval);
+            setPollingInterval(null);
+          } else if (result.status === 'failed' || result.status === 'cancelled') {
+            setPaymentStatus({
+              type: 'error',
+              message: `Payment ${result.status}. Please try again.`
+            });
+            clearInterval(interval);
+            setPollingInterval(null);
+          }
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    setPollingInterval(interval);
+
+    // Stop polling after 10 minutes
+    setTimeout(() => {
+      clearInterval(interval);
+      setPollingInterval(null);
+    }, 600000);
+  };
+
+  const handleOpenCheckout = () => {
+    if (checkoutUri) {
+      // Try to open the deep link
+      window.open(checkoutUri, '_blank');
+    }
+  };
+
+  const handleRetry = () => {
+    setPaymentStatus(null);
+    setPaymentRef(null);
+    setCheckoutUri(null);
+    if (pollingInterval) {
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
+    }
+  };
+
+  // Success screen
   if (paymentStatus?.type === 'success') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50 flex items-center justify-center px-4 pt-16">
@@ -84,31 +198,38 @@ const PaymentPage = () => {
             <SafeIcon icon={FiCheck} className="w-8 h-8 text-white" />
           </motion.div>
           
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Initiated!</h2>
-          <p className="text-gray-600 mb-4">
-            {paymentStatus.message}
-          </p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
+          <p className="text-gray-600 mb-4">{paymentStatus.message}</p>
           
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <div className="text-sm text-gray-600">
               <div className="flex justify-between py-1">
                 <span>Transaction ID:</span>
                 <span className="font-mono text-xs">
-                  {paymentStatus.transaction?.transaction_id}
+                  {paymentStatus.transaction?.transaction_id || paymentRef}
                 </span>
               </div>
               <div className="flex justify-between py-1">
-                <span>Status:</span>
-                <span className="capitalize font-semibold text-orange-600">
-                  {paymentStatus.transaction?.status}
+                <span>Amount:</span>
+                <span className="font-semibold">
+                  ${paymentStatus.transaction?.amount || formData.amount}
+                </span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span>Provider:</span>
+                <span className="capitalize">
+                  {paymentStatus.transaction?.provider || formData.provider}
                 </span>
               </div>
             </div>
           </div>
           
-          <p className="text-sm text-gray-500">
-            Please complete the payment on your mobile device
-          </p>
+          <button
+            onClick={() => window.location.href = '/#/'}
+            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+          >
+            Continue to Dashboard
+          </button>
         </motion.div>
       </div>
     );
@@ -131,12 +252,8 @@ const PaymentPage = () => {
           >
             <SafeIcon icon={FiCreditCard} className="w-8 h-8 text-white" />
           </motion.div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            {t('payment')}
-          </h1>
-          <p className="text-gray-600">
-            Choose your preferred payment method
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{t('payment')}</h1>
+          <p className="text-gray-600">Choose your preferred payment method</p>
         </div>
 
         {/* Payment Method Selection */}
@@ -147,7 +264,6 @@ const PaymentPage = () => {
           transition={{ duration: 0.6, delay: 0.3 }}
         >
           <h3 className="font-semibold text-gray-900 mb-4">Payment Method</h3>
-          
           <div className="space-y-3">
             <label className="flex items-center space-x-3 p-3 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-blue-300 transition-colors">
               <input
@@ -161,15 +277,8 @@ const PaymentPage = () => {
               <SafeIcon icon={FiSmartphone} className="w-5 h-5 text-blue-600" />
               <span className="font-medium text-gray-900">Mobile Money</span>
             </label>
-            
             <label className="flex items-center space-x-3 p-3 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-blue-300 transition-colors opacity-50">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="card"
-                disabled
-                className="text-blue-600"
-              />
+              <input type="radio" name="paymentMethod" value="card" disabled className="text-blue-600" />
               <SafeIcon icon={FiCreditCard} className="w-5 h-5 text-gray-400" />
               <span className="font-medium text-gray-500">Credit Card (Coming Soon)</span>
             </label>
@@ -186,7 +295,7 @@ const PaymentPage = () => {
             transition={{ duration: 0.6, delay: 0.4 }}
           >
             <h3 className="font-semibold text-gray-900 mb-4">Mobile Money Payment</h3>
-            
+
             {/* Provider Selection */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-3">
@@ -251,34 +360,109 @@ const PaymentPage = () => {
               />
             </div>
 
-            {/* Error Display */}
-            {paymentStatus?.type === 'error' && (
-              <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <SafeIcon icon={FiAlertCircle} className="w-5 h-5 text-red-500" />
-                <span className="text-sm text-red-700">{paymentStatus.message}</span>
-              </div>
-            )}
+            {/* Status Display */}
+            <AnimatePresence>
+              {paymentStatus && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className={`p-4 rounded-lg border ${
+                    paymentStatus.type === 'error'
+                      ? 'bg-red-50 border-red-200'
+                      : paymentStatus.type === 'initiated'
+                      ? 'bg-blue-50 border-blue-200'
+                      : 'bg-green-50 border-green-200'
+                  }`}
+                >
+                  <div className="flex items-start space-x-3">
+                    <SafeIcon
+                      icon={
+                        paymentStatus.type === 'error'
+                          ? FiAlertCircle
+                          : paymentStatus.type === 'initiated'
+                          ? FiLoader
+                          : FiCheck
+                      }
+                      className={`w-5 h-5 mt-0.5 ${
+                        paymentStatus.type === 'error'
+                          ? 'text-red-500'
+                          : paymentStatus.type === 'initiated'
+                          ? 'text-blue-500 animate-spin'
+                          : 'text-green-500'
+                      }`}
+                    />
+                    <div className="flex-1">
+                      <p
+                        className={`text-sm font-medium ${
+                          paymentStatus.type === 'error'
+                            ? 'text-red-700'
+                            : paymentStatus.type === 'initiated'
+                            ? 'text-blue-700'
+                            : 'text-green-700'
+                        }`}
+                      >
+                        {paymentStatus.message}
+                      </p>
+                      {paymentStatus.payment_ref && (
+                        <p className="text-xs text-gray-500 mt-1 font-mono">
+                          Ref: {paymentStatus.payment_ref}
+                        </p>
+                      )}
+                    </div>
+                    {paymentStatus.type === 'error' && (
+                      <button
+                        type="button"
+                        onClick={handleRetry}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <SafeIcon icon={FiX} className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Checkout Button */}
+                  {paymentStatus.type === 'initiated' && checkoutUri && (
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={handleOpenCheckout}
+                        className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
+                      >
+                        <SafeIcon icon={FiExternalLink} className="w-4 h-4" />
+                        <span>Complete Payment on Mobile</span>
+                      </button>
+                      <p className="text-xs text-gray-500 text-center mt-2">
+                        Waiting for payment confirmation...
+                      </p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Submit Button */}
-            <motion.button
-              type="submit"
-              disabled={isProcessing || !formData.amount || !formData.phone}
-              className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-4 px-6 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center space-x-2"
-              whileHover={{ scale: isProcessing ? 1 : 1.02 }}
-              whileTap={{ scale: isProcessing ? 1 : 0.98 }}
-            >
-              {isProcessing ? (
-                <>
-                  <SafeIcon icon={FiLoader} className="w-5 h-5 animate-spin" />
-                  <span>Processing...</span>
-                </>
-              ) : (
-                <>
-                  <SafeIcon icon={FiSmartphone} className="w-5 h-5" />
-                  <span>Pay ${formData.amount || '0.00'}</span>
-                </>
-              )}
-            </motion.button>
+            {!paymentStatus?.type === 'initiated' && (
+              <motion.button
+                type="submit"
+                disabled={isProcessing || !formData.amount || !formData.phone}
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-4 px-6 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center space-x-2"
+                whileHover={{ scale: isProcessing ? 1 : 1.02 }}
+                whileTap={{ scale: isProcessing ? 1 : 0.98 }}
+              >
+                {isProcessing ? (
+                  <>
+                    <SafeIcon icon={FiLoader} className="w-5 h-5 animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <SafeIcon icon={FiSmartphone} className="w-5 h-5" />
+                    <span>Pay ${formData.amount || '0.00'}</span>
+                  </>
+                )}
+              </motion.button>
+            )}
           </motion.form>
         )}
 
@@ -297,7 +481,7 @@ const PaymentPage = () => {
             </li>
             <li className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span>Instant payment confirmation</span>
+              <span>Real-time payment confirmation</span>
             </li>
             <li className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-blue-500 rounded-full"></div>

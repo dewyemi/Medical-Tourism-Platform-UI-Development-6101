@@ -1,105 +1,226 @@
-import { useState, useEffect, useContext, createContext } from 'react';
-import { getProfile, signOut } from '../lib/supabase';
+import { useState, useEffect } from 'react';
+import { 
+  signIn, 
+  signUp, 
+  signOut, 
+  getCurrentUser, 
+  getProfile, 
+  createUserProfile,
+  getCurrentAuth
+} from '../lib/supabase';
 import supabase from '../lib/supabase';
 
-const AuthContext = createContext({});
-
-export const AuthProvider = ({ children }) => {
+export const useAuth = () => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    console.log('🚀 useAuth: Initializing...');
+    
+    // Check demo auth first
+    const demoAuth = getCurrentAuth();
+    if (demoAuth) {
+      console.log('🎭 Found demo auth:', demoAuth.user.email);
+      setUser(demoAuth.user);
+      setProfile(demoAuth.profile);
+      setLoading(false);
+      return;
+    }
+    
     // Get initial session
     getInitialSession();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session?.user?.email);
-      
-      if (session?.user) {
-        setUser(session.user);
-        await fetchProfile(session.user.id);
-      } else {
-        setUser(null);
-        setProfile(null);
+    // Listen for auth changes (only for real Supabase auth)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('🚀 Auth state changed:', event, session?.user?.email);
+        
+        if (session?.user) {
+          setUser(session.user);
+          await loadProfile(session.user.id);
+        } else {
+          // Check if we have demo auth
+          const demoAuth = getCurrentAuth();
+          if (demoAuth) {
+            setUser(demoAuth.user);
+            setProfile(demoAuth.profile);
+          } else {
+            setUser(null);
+            setProfile(null);
+          }
+        }
+        
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('🚀 useAuth: Cleanup');
+      subscription.unsubscribe();
+    };
   }, []);
 
   const getInitialSession = async () => {
     try {
+      console.log('🚀 Getting initial session...');
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
+        console.log('🚀 Found existing session:', session.user.email);
         setUser(session.user);
-        await fetchProfile(session.user.id);
+        await loadProfile(session.user.id);
       }
     } catch (error) {
-      console.error('Error getting initial session:', error);
+      console.error('🚀 Error getting session:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchProfile = async (userId) => {
+  const loadProfile = async (userId) => {
     try {
+      console.log('🚀 Loading profile for:', userId);
       const { data, error } = await getProfile(userId);
-      if (error) {
-        console.error('Error fetching profile:', error);
-        return;
+      
+      if (data) {
+        console.log('🚀 Profile loaded:', data);
+        setProfile(data);
+      } else {
+        console.error('🚀 Profile load error:', error);
       }
-      setProfile(data);
     } catch (error) {
-      console.error('Error in fetchProfile:', error);
+      console.error('🚀 Profile load exception:', error);
+    }
+  };
+
+  const login = async (email, password) => {
+    console.log('🔥 Login attempt for:', email);
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { data, error } = await signIn(email, password);
+      
+      if (error) {
+        console.error('❌ Login failed:', error);
+        setError(error.message);
+        return { success: false, error: error.message };
+      }
+
+      console.log('✅ Login successful');
+      
+      // Handle demo auth
+      if (email.includes('demo.')) {
+        const demoAuth = getCurrentAuth();
+        if (demoAuth) {
+          setUser(demoAuth.user);
+          setProfile(demoAuth.profile);
+        }
+      } else {
+        setUser(data.user);
+        await loadProfile(data.user.id);
+      }
+      
+      return { success: true, user: data.user };
+    } catch (error) {
+      const errorMessage = error.message || 'Login failed';
+      console.error('❌ Login exception:', error);
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signup = async (email, password, userData) => {
+    console.log('🔥 Signup attempt for:', email);
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { data, error } = await signUp(email, password, userData);
+      
+      if (error) {
+        console.error('❌ Signup failed:', error);
+        setError(error.message);
+        return { success: false, error: error.message };
+      }
+
+      console.log('✅ Signup successful');
+      
+      // For demo accounts, auto-login
+      if (email.includes('demo.')) {
+        return await login(email, password);
+      }
+      
+      // For real accounts, the user will be set by auth state change
+      return { success: true, user: data.user };
+    } catch (error) {
+      const errorMessage = error.message || 'Signup failed';
+      console.error('❌ Signup exception:', error);
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = async () => {
+    console.log('🔥 Logout attempt');
     setLoading(true);
+    
     try {
-      const { error } = await signOut();
-      if (error) throw error;
-      
+      await signOut();
       setUser(null);
       setProfile(null);
+      setError(null);
+      console.log('✅ Logout successful');
+      return { success: true };
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('❌ Logout error:', error);
+      return { success: false, error: error.message };
     } finally {
       setLoading(false);
     }
   };
 
-  const value = {
-    user,
-    profile,
-    role: profile?.role || 'client',
-    loading,
-    logout,
-    refreshProfile: () => fetchProfile(user?.id)
+  // Role helpers
+  const hasRole = (roles) => {
+    if (!profile) return false;
+    if (typeof roles === 'string') return profile.role === roles;
+    return roles.includes(profile.role);
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
+  return {
+    user,
+    profile,
+    loading,
+    error,
+    role: profile?.role || 'client',
+    isAuthenticated: !!user,
+    login,
+    signup,
+    logout,
+    hasRole,
+    isAdmin: () => hasRole('admin'),
+    isEmployee: () => hasRole(['admin', 'employee']),
+    clearError: () => setError(null)
+  };
 };
 
 // AuthGuard Component
 export const AuthGuard = ({ children, roles = [] }) => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, hasRole } = useAuth();
+
+  console.log('🛡️ AuthGuard check:', {
+    hasUser: !!user,
+    userEmail: user?.email,
+    profileRole: profile?.role,
+    requiredRoles: roles,
+    loading
+  });
 
   if (loading) {
     return (
@@ -113,13 +234,13 @@ export const AuthGuard = ({ children, roles = [] }) => {
   }
 
   if (!user) {
-    // Redirect to login if not authenticated
+    console.log('🛡️ No user, redirecting to login');
     window.location.href = '/#/login';
     return null;
   }
 
-  if (roles.length > 0 && !roles.includes(profile?.role)) {
-    // Show unauthorized message if role doesn't match
+  if (roles.length > 0 && !hasRole(roles)) {
+    console.log('🛡️ Access denied - insufficient role');
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
         <div className="bg-white rounded-2xl p-8 shadow-xl max-w-md w-full text-center">
@@ -146,5 +267,6 @@ export const AuthGuard = ({ children, roles = [] }) => {
     );
   }
 
+  console.log('🛡️ Access granted');
   return children;
 };

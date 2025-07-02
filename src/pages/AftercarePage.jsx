@@ -3,8 +3,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../hooks/useAuth';
+import { AuthGuard } from '../hooks/useAuth';
 import SafeIcon from '../common/SafeIcon';
 import supabase from '../lib/supabase';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
 import * as FiIcons from 'react-icons/fi';
 
 const {
@@ -30,130 +42,31 @@ const {
   FiBarChart3
 } = FiIcons;
 
-// Simple progress chart component without external dependencies
-const ProgressChart = ({ data }) => {
-  if (!data || data.length === 0) {
-    return (
-      <div className="h-64 flex items-center justify-center text-gray-500">
-        No data available for chart
-      </div>
-    );
-  }
-
-  const maxScore = 10;
-  const chartWidth = 600;
-  const chartHeight = 200;
-  const padding = 40;
-
-  const xStep = (chartWidth - 2 * padding) / (data.length - 1 || 1);
-  const yStep = (chartHeight - 2 * padding) / maxScore;
-
-  const points = data.map((item, index) => ({
-    x: padding + index * xStep,
-    y: chartHeight - padding - (item.pain_score * yStep),
-    date: new Date(item.report_date).toLocaleDateString(),
-    score: item.pain_score
-  }));
-
-  const pathD = points.reduce((path, point, index) => {
-    return path + (index === 0 ? `M ${point.x} ${point.y}` : ` L ${point.x} ${point.y}`);
-  }, '');
-
-  return (
-    <div className="w-full h-64 bg-gray-50 rounded-lg p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Pain Score Progress</h3>
-      <svg width="100%" height="200" viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="border rounded">
-        {/* Grid lines */}
-        {[...Array(11)].map((_, i) => (
-          <line
-            key={i}
-            x1={padding}
-            y1={chartHeight - padding - (i * yStep)}
-            x2={chartWidth - padding}
-            y2={chartHeight - padding - (i * yStep)}
-            stroke="#e5e7eb"
-            strokeWidth="1"
-          />
-        ))}
-        
-        {/* Y-axis labels */}
-        {[...Array(11)].map((_, i) => (
-          <text
-            key={i}
-            x={padding - 10}
-            y={chartHeight - padding - (i * yStep) + 5}
-            textAnchor="end"
-            className="text-xs fill-gray-600"
-          >
-            {i}
-          </text>
-        ))}
-        
-        {/* Line chart */}
-        <path
-          d={pathD}
-          fill="none"
-          stroke="#3b82f6"
-          strokeWidth="2"
-          className="drop-shadow-sm"
-        />
-        
-        {/* Data points */}
-        {points.map((point, index) => (
-          <g key={index}>
-            <circle
-              cx={point.x}
-              cy={point.y}
-              r="4"
-              fill="#3b82f6"
-              className="drop-shadow-sm"
-            />
-            <title>{`${point.date}: ${point.score}/10`}</title>
-          </g>
-        ))}
-        
-        {/* X-axis */}
-        <line
-          x1={padding}
-          y1={chartHeight - padding}
-          x2={chartWidth - padding}
-          y2={chartHeight - padding}
-          stroke="#374151"
-          strokeWidth="2"
-        />
-        
-        {/* Y-axis */}
-        <line
-          x1={padding}
-          y1={padding}
-          x2={padding}
-          y2={chartHeight - padding}
-          stroke="#374151"
-          strokeWidth="2"
-        />
-      </svg>
-      <div className="mt-2 text-sm text-gray-600 text-center">
-        Pain Score (1-10) over time
-      </div>
-    </div>
-  );
-};
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 const AftercarePage = () => {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { user, profile, role } = useAuth();
-  
   const [activeTab, setActiveTab] = useState('plan');
   const [loading, setLoading] = useState(true);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [patients, setPatients] = useState([]);
-  
+
   // Data states
   const [aftercarePlan, setAftercarePlan] = useState(null);
   const [progressData, setProgressData] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  
+
   // Form states
   const [showNewReport, setShowNewReport] = useState(false);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
@@ -197,7 +110,6 @@ const AftercarePage = () => {
   const initializeData = async () => {
     try {
       setLoading(true);
-      
       if (role === 'admin' || role === 'employee') {
         // Load all patients for staff
         await loadPatients();
@@ -307,7 +219,6 @@ const AftercarePage = () => {
 
   const handleReportSubmit = async (e) => {
     e.preventDefault();
-    
     try {
       let reportUrl = null;
       if (reportFile) {
@@ -315,7 +226,6 @@ const AftercarePage = () => {
       }
 
       const targetPatientId = selectedPatient?.user_id || user.id;
-      
       const { error } = await supabase
         .from('aftercare_reports_2024')
         .insert({
@@ -334,7 +244,7 @@ const AftercarePage = () => {
       setReportForm({ title: '', notes: '', pain_score: 5 });
       setReportFile(null);
       setShowNewReport(false);
-      
+
       // Reload data
       await loadPatientData(targetPatientId);
     } catch (error) {
@@ -344,10 +254,8 @@ const AftercarePage = () => {
 
   const handleAppointmentSubmit = async (e) => {
     e.preventDefault();
-    
     try {
       const targetPatientId = selectedPatient?.user_id || user.id;
-      
       const { error } = await supabase
         .from('virtual_appointments_2024')
         .insert({
@@ -372,7 +280,7 @@ const AftercarePage = () => {
         zoom_link: ''
       });
       setShowNewAppointment(false);
-      
+
       // Reload appointments
       await loadAppointments(targetPatientId);
     } catch (error) {
@@ -388,12 +296,55 @@ const AftercarePage = () => {
         .eq('id', id);
 
       if (error) throw error;
-      
+
       const targetPatientId = selectedPatient?.user_id || user.id;
       await loadAppointments(targetPatientId);
     } catch (error) {
       console.error('Error deleting appointment:', error);
     }
+  };
+
+  // Chart.js configuration
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Pain Score Progress Over Time',
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 10,
+        title: {
+          display: true,
+          text: 'Pain Score (1-10)'
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: 'Date'
+        }
+      }
+    },
+  };
+
+  const chartData = {
+    labels: progressData.map(item => new Date(item.report_date).toLocaleDateString()),
+    datasets: [
+      {
+        label: 'Pain Score',
+        data: progressData.map(item => item.pain_score),
+        borderColor: 'rgb(59, 130, 246)',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        tension: 0.1,
+      },
+    ],
   };
 
   if (loading) {
@@ -414,7 +365,7 @@ const AftercarePage = () => {
               <SafeIcon icon={FiHeart} className="w-8 h-8" />
               <h1 className="text-2xl lg:text-3xl font-bold">Aftercare Dashboard</h1>
             </div>
-            
+
             {/* Patient Selector for Staff */}
             {(role === 'admin' || role === 'employee') && (
               <div className="flex items-center space-x-3">
@@ -486,9 +437,9 @@ const AftercarePage = () => {
                           Next Follow-up Date
                         </label>
                         <p className="text-gray-900 font-semibold">
-                          {aftercarePlan.follow_up_date ? 
-                            new Date(aftercarePlan.follow_up_date).toLocaleDateString() : 
-                            'Not scheduled'
+                          {aftercarePlan.follow_up_date 
+                            ? new Date(aftercarePlan.follow_up_date).toLocaleDateString()
+                            : 'Not scheduled'
                           }
                         </p>
                       </div>
@@ -501,7 +452,6 @@ const AftercarePage = () => {
                         </span>
                       </div>
                     </div>
-                    
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Doctor's Notes
@@ -512,7 +462,6 @@ const AftercarePage = () => {
                         </p>
                       </div>
                     </div>
-
                     {aftercarePlan.report_url && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -547,7 +496,7 @@ const AftercarePage = () => {
                     <span>New Report</span>
                   </button>
                 </div>
-                
+
                 {/* Recent Reports */}
                 <div className="space-y-3">
                   {progressData.slice(0, 3).map((report) => (
@@ -587,7 +536,9 @@ const AftercarePage = () => {
             >
               <div className="bg-white rounded-2xl p-6 shadow-lg">
                 {progressData.length > 0 ? (
-                  <ProgressChart data={progressData} />
+                  <div className="h-96">
+                    <Line options={chartOptions} data={chartData} />
+                  </div>
                 ) : (
                   <div className="text-center py-12">
                     <SafeIcon icon={FiBarChart3} className="w-12 h-12 text-gray-300 mx-auto mb-4" />
@@ -610,10 +561,13 @@ const AftercarePage = () => {
                     <h3 className="font-semibold text-gray-900">Latest Score</h3>
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
-                    {progressData.length > 0 ? `${progressData[progressData.length - 1].pain_score}/10` : 'N/A'}
+                    {progressData.length > 0 
+                      ? `${progressData[progressData.length - 1].pain_score}/10`
+                      : 'N/A'
+                    }
                   </p>
                 </div>
-                
+
                 <div className="bg-white rounded-2xl p-6 shadow-lg">
                   <div className="flex items-center space-x-3 mb-2">
                     <SafeIcon icon={FiTrendingUp} className="w-6 h-6 text-green-600" />
@@ -621,12 +575,13 @@ const AftercarePage = () => {
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
                     {progressData.length >= 2 ? (
-                      progressData[progressData.length - 1].pain_score < progressData[progressData.length - 2].pain_score ? 
-                      '↓ Improving' : '↑ Monitor'
+                      progressData[progressData.length - 1].pain_score < progressData[progressData.length - 2].pain_score
+                        ? '↓ Improving'
+                        : '↑ Monitor'
                     ) : 'N/A'}
                   </p>
                 </div>
-                
+
                 <div className="bg-white rounded-2xl p-6 shadow-lg">
                   <div className="flex items-center space-x-3 mb-2">
                     <SafeIcon icon={FiCalendar} className="w-6 h-6 text-purple-600" />
@@ -671,9 +626,11 @@ const AftercarePage = () => {
                                 Dr. {appointment.doctor}
                               </h3>
                               <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                appointment.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                appointment.status === 'scheduled' ? 'bg-blue-100 text-blue-800' :
-                                'bg-gray-100 text-gray-800'
+                                appointment.status === 'completed'
+                                  ? 'bg-green-100 text-green-800'
+                                  : appointment.status === 'scheduled'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-gray-100 text-gray-800'
                               }`}>
                                 {appointment.status}
                               </span>
@@ -746,11 +703,11 @@ const AftercarePage = () => {
                   type="text"
                   placeholder="Report title"
                   value={reportForm.title}
-                  onChange={(e) => setReportForm({...reportForm, title: e.target.value})}
+                  onChange={(e) => setReportForm({ ...reportForm, title: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Pain Score (1-10)
@@ -760,7 +717,7 @@ const AftercarePage = () => {
                     min="1"
                     max="10"
                     value={reportForm.pain_score}
-                    onChange={(e) => setReportForm({...reportForm, pain_score: parseInt(e.target.value)})}
+                    onChange={(e) => setReportForm({ ...reportForm, pain_score: parseInt(e.target.value) })}
                     className="w-full"
                   />
                   <div className="flex justify-between text-xs text-gray-500 mt-1">
@@ -769,15 +726,15 @@ const AftercarePage = () => {
                     <span>10 (Severe)</span>
                   </div>
                 </div>
-                
+
                 <textarea
                   placeholder="Additional notes..."
                   value={reportForm.notes}
-                  onChange={(e) => setReportForm({...reportForm, notes: e.target.value})}
+                  onChange={(e) => setReportForm({ ...reportForm, notes: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                   rows={3}
                 />
-                
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Upload Report File (optional)
@@ -789,7 +746,7 @@ const AftercarePage = () => {
                     accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
                   />
                 </div>
-                
+
                 <div className="flex gap-4">
                   <button
                     type="submit"
@@ -832,46 +789,46 @@ const AftercarePage = () => {
                   type="text"
                   placeholder="Doctor name"
                   value={appointmentForm.doctor}
-                  onChange={(e) => setAppointmentForm({...appointmentForm, doctor: e.target.value})}
+                  onChange={(e) => setAppointmentForm({ ...appointmentForm, doctor: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
-                
+
                 <select
                   value={appointmentForm.type}
-                  onChange={(e) => setAppointmentForm({...appointmentForm, type: e.target.value})}
+                  onChange={(e) => setAppointmentForm({ ...appointmentForm, type: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {appointmentTypes.map(type => (
                     <option key={type.value} value={type.value}>{type.label}</option>
                   ))}
                 </select>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <input
                     type="date"
                     value={appointmentForm.date}
-                    onChange={(e) => setAppointmentForm({...appointmentForm, date: e.target.value})}
+                    onChange={(e) => setAppointmentForm({ ...appointmentForm, date: e.target.value })}
                     className="px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                   <input
                     type="time"
                     value={appointmentForm.time}
-                    onChange={(e) => setAppointmentForm({...appointmentForm, time: e.target.value})}
+                    onChange={(e) => setAppointmentForm({ ...appointmentForm, time: e.target.value })}
                     className="px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
                 </div>
-                
+
                 <input
                   type="url"
                   placeholder="Zoom meeting link (optional)"
                   value={appointmentForm.zoom_link}
-                  onChange={(e) => setAppointmentForm({...appointmentForm, zoom_link: e.target.value})}
+                  onChange={(e) => setAppointmentForm({ ...appointmentForm, zoom_link: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                
+
                 <div className="flex gap-4">
                   <button
                     type="submit"
@@ -896,4 +853,13 @@ const AftercarePage = () => {
   );
 };
 
-export default AftercarePage;
+// Wrap the component with AuthGuard for patient role
+const ProtectedAftercarePage = () => {
+  return (
+    <AuthGuard roles={['client', 'patient']}>
+      <AftercarePage />
+    </AuthGuard>
+  );
+};
+
+export default ProtectedAftercarePage;

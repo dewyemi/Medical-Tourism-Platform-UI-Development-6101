@@ -9,168 +9,395 @@ if (SUPABASE_URL === 'https://<PROJECT-ID>.supabase.co' || SUPABASE_ANON_KEY ===
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
+    autoRefreshToken: true,
     persistSession: true,
-    autoRefreshToken: true
+    detectSessionInUrl: false
   }
 })
 
-// Auth helpers
-export const signUp = async (email, password, userData = {}) => {
+export default supabase;
+
+// Demo users for fallback
+const DEMO_USERS = {
+  'demo.client@test.com': {
+    id: 'demo-client-123',
+    email: 'demo.client@test.com',
+    password: 'password123',
+    profile: {
+      user_id: 'demo-client-123',
+      email: 'demo.client@test.com',
+      full_name: 'Demo Client',
+      role: 'client'
+    }
+  },
+  'demo.employee@test.com': {
+    id: 'demo-employee-123',
+    email: 'demo.employee@test.com',
+    password: 'password123',
+    profile: {
+      user_id: 'demo-employee-123',
+      email: 'demo.employee@test.com',
+      full_name: 'Demo Employee',
+      role: 'employee'
+    }
+  },
+  'demo.admin@test.com': {
+    id: 'demo-admin-123',
+    email: 'demo.admin@test.com',
+    password: 'password123',
+    profile: {
+      user_id: 'demo-admin-123',
+      email: 'demo.admin@test.com',
+      full_name: 'Demo Admin',
+      role: 'admin'
+    }
+  }
+};
+
+// Simple storage functions
+const saveUserData = (user, profile) => {
   try {
-    const { data, error } = await supabase.auth.signUp({
+    localStorage.setItem('auth_user', JSON.stringify(user));
+    localStorage.setItem('auth_profile', JSON.stringify(profile));
+    localStorage.setItem('auth_token', 'demo-token-' + Date.now());
+    return true;
+  } catch (error) {
+    console.error('Storage error:', error);
+    return false;
+  }
+};
+
+const getUserData = () => {
+  try {
+    const userStr = localStorage.getItem('auth_user');
+    const profileStr = localStorage.getItem('auth_profile');
+    const token = localStorage.getItem('auth_token');
+    
+    if (!userStr || !profileStr || !token) {
+      return null;
+    }
+    
+    return {
+      user: JSON.parse(userStr),
+      profile: JSON.parse(profileStr),
+      token
+    };
+  } catch (error) {
+    console.error('Get user data error:', error);
+    return null;
+  }
+};
+
+const clearUserData = () => {
+  try {
+    localStorage.removeItem('auth_user');
+    localStorage.removeItem('auth_profile');
+    localStorage.removeItem('auth_token');
+    return true;
+  } catch (error) {
+    console.error('Clear data error:', error);
+    return false;
+  }
+};
+
+// Demo auth functions (fallback)
+export const demoLogin = (email, password) => {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      console.log('🎭 Demo login attempt:', email);
+      
+      const userData = DEMO_USERS[email];
+      if (!userData) {
+        reject(new Error('User not found'));
+        return;
+      }
+      
+      if (userData.password !== password) {
+        reject(new Error('Invalid password'));
+        return;
+      }
+      
+      const user = {
+        id: userData.id,
+        email: userData.email,
+        created_at: new Date().toISOString()
+      };
+      
+      if (saveUserData(user, userData.profile)) {
+        console.log('✅ Demo login successful');
+        resolve({ user, profile: userData.profile });
+      } else {
+        reject(new Error('Failed to save user data'));
+      }
+    }, 1000);
+  });
+};
+
+export const demoLogout = () => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      clearUserData();
+      console.log('✅ Demo logout successful');
+      resolve(true);
+    }, 100);
+  });
+};
+
+export const getCurrentAuth = () => {
+  return getUserData();
+};
+
+// Supabase auth functions with timeout and fallback
+const withTimeout = (promise, timeoutMs = 5000) => {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
+    )
+  ]);
+};
+
+export const signUp = async (email, password, userData = {}) => {
+  console.log('🔥 SignUp attempt:', email);
+  
+  try {
+    const signUpPromise = supabase.auth.signUp({
       email,
       password,
       options: {
-        data: userData
+        data: {
+          full_name: userData.full_name || '',
+          role: userData.role || 'client'
+        }
       }
     });
 
-    if (error) throw error;
+    const { data, error } = await withTimeout(signUpPromise, 5000);
 
-    // Create user profile after successful signup
-    if (data.user) {
-      const { error: profileError } = await supabase
-        .from('user_profiles_2024')
-        .insert({
-          user_id: data.user.id,
-          email: data.user.email,
-          full_name: userData.full_name || '',
-          role: userData.role || 'client',
-          created_at: new Date().toISOString()
-        });
-
-      if (profileError) {
-        console.error('Error creating profile:', profileError);
-        // Don't throw error here, let user proceed
+    if (error) {
+      console.error('❌ SignUp error:', error);
+      // Fallback to demo for demo emails
+      if (email.includes('demo.')) {
+        console.log('🎭 Falling back to demo signup');
+        const demoResult = await demoLogin(email, password);
+        return { data: { user: demoResult.user }, error: null };
       }
+      return { data: null, error };
     }
 
+    console.log('✅ SignUp successful');
     return { data, error: null };
+    
   } catch (error) {
-    console.error('SignUp error:', error);
+    console.error('❌ SignUp timeout/error:', error);
+    // Fallback to demo for demo emails
+    if (email.includes('demo.')) {
+      console.log('🎭 Falling back to demo signup due to timeout');
+      try {
+        const demoResult = await demoLogin(email, password);
+        return { data: { user: demoResult.user }, error: null };
+      } catch (demoError) {
+        return { data: null, error: demoError };
+      }
+    }
     return { data: null, error };
   }
 };
 
 export const signIn = async (email, password) => {
+  console.log('🔥 SignIn attempt:', email);
+  
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const signInPromise = supabase.auth.signInWithPassword({
       email,
       password
     });
 
-    if (error) throw error;
+    const { data, error } = await withTimeout(signInPromise, 5000);
 
-    return { data, error: null };
+    if (error) {
+      console.error('❌ SignIn error:', error);
+      // Fallback to demo for demo emails
+      if (email.includes('demo.')) {
+        console.log('🎭 Falling back to demo login');
+        const demoResult = await demoLogin(email, password);
+        return { data: { user: demoResult.user, session: { user: demoResult.user } }, error: null };
+      }
+      return { data, error };
+    }
+
+    console.log('✅ SignIn successful');
+    return { data, error };
+    
   } catch (error) {
-    console.error('SignIn error:', error);
+    console.error('❌ SignIn timeout/error:', error);
+    // Fallback to demo for demo emails
+    if (email.includes('demo.')) {
+      console.log('🎭 Falling back to demo login due to timeout');
+      try {
+        const demoResult = await demoLogin(email, password);
+        return { data: { user: demoResult.user, session: { user: demoResult.user } }, error: null };
+      } catch (demoError) {
+        return { data: null, error: demoError };
+      }
+    }
     return { data: null, error };
   }
 };
 
 export const signOut = async () => {
-  try {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+  console.log('🔥 SignOut attempt');
+  
+  // Check if using demo auth
+  const currentAuth = getCurrentAuth();
+  if (currentAuth && currentAuth.user.id.includes('demo-')) {
+    console.log('🎭 Demo logout');
+    await demoLogout();
     return { error: null };
-  } catch (error) {
-    console.error('SignOut error:', error);
+  }
+  
+  try {
+    const { error } = await withTimeout(supabase.auth.signOut(), 3000);
+    console.log('✅ SignOut successful');
     return { error };
+  } catch (error) {
+    console.error('❌ SignOut error:', error);
+    // Force logout anyway
+    clearUserData();
+    return { error: null };
+  }
+};
+
+export const getCurrentUser = async () => {
+  // Check demo auth first
+  const demoAuth = getCurrentAuth();
+  if (demoAuth) {
+    console.log('🎭 Demo user:', demoAuth.user.email);
+    return demoAuth.user;
+  }
+  
+  try {
+    const { data: { user }, error } = await withTimeout(supabase.auth.getUser(), 3000);
+    console.log('🔥 Current user:', user?.email);
+    return user;
+  } catch (error) {
+    console.error('❌ Get user error:', error);
+    return null;
+  }
+};
+
+// Profile functions
+export const createUserProfile = async (user, userData = {}) => {
+  console.log('🔥 Creating profile for:', user.email);
+  
+  // Demo users already have profiles
+  if (user.id.includes('demo-')) {
+    const demoAuth = getCurrentAuth();
+    return { data: demoAuth?.profile, error: null };
+  }
+  
+  try {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('user_profiles')
+        .upsert({
+          user_id: user.id,
+          email: user.email,
+          full_name: userData.full_name || user.user_metadata?.full_name || '',
+          role: userData.role || user.user_metadata?.role || 'client'
+        }, {
+          onConflict: 'user_id'
+        })
+        .select()
+        .single(),
+      5000
+    );
+
+    console.log('✅ Profile created');
+    return { data, error };
+  } catch (error) {
+    console.error('❌ Profile creation error:', error);
+    // Return default profile
+    return {
+      data: {
+        user_id: user.id,
+        email: user.email,
+        full_name: userData.full_name || '',
+        role: userData.role || 'client'
+      },
+      error: null
+    };
   }
 };
 
 export const getProfile = async (userId) => {
+  console.log('🔥 Fetching profile for:', userId);
+  
+  // Demo users
+  if (userId.includes('demo-')) {
+    const demoAuth = getCurrentAuth();
+    return { data: demoAuth?.profile, error: null };
+  }
+  
   try {
-    if (!userId) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return { data: null, error: new Error('No authenticated user') };
-      userId = user.id;
-    }
+    const { data, error } = await withTimeout(
+      supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single(),
+      3000
+    );
 
-    // Simple query to avoid recursion
-    const { data, error } = await supabase
-      .from('user_profiles_2024')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (error) {
-      console.error('Profile fetch error:', error);
-      
-      // If profile doesn't exist, create one
-      if (error.code === 'PGRST116') {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: newProfile, error: createError } = await supabase
-            .from('user_profiles_2024')
-            .insert({
-              user_id: user.id,
-              email: user.email,
-              full_name: user.user_metadata?.full_name || '',
-              role: 'client',
-              created_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (createError) {
-            console.error('Profile creation error:', createError);
-            // Return default profile if creation fails
-            return {
-              data: {
-                user_id: user.id,
-                email: user.email,
-                full_name: user.user_metadata?.full_name || '',
-                role: 'client'
-              },
-              error: null
-            };
-          }
-          return { data: newProfile, error: null };
-        }
-      }
-      
-      // Return default profile for authenticated user
-      const { data: { user } } = await supabase.auth.getUser();
+    if (error && error.code === 'PGRST116') {
+      // No profile found, create one
+      const user = await getCurrentUser();
       if (user) {
-        return {
-          data: {
-            user_id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || '',
-            role: 'client'
-          },
-          error: null
-        };
+        return await createUserProfile(user);
       }
-      
-      throw error;
     }
 
-    return { data, error: null };
+    return { data, error };
   } catch (error) {
-    console.error('GetProfile error:', error);
-    
-    // Fallback to basic user info if profile fetch fails
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        return {
-          data: {
-            user_id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || '',
-            role: 'client'
-          },
-          error: null
-        };
-      }
-    } catch (fallbackError) {
-      console.error('Fallback error:', fallbackError);
-    }
-    
-    return { data: null, error };
+    console.error('❌ Profile fetch error:', error);
+    // Return default profile
+    return {
+      data: {
+        user_id: userId,
+        email: '',
+        full_name: '',
+        role: 'client'
+      },
+      error: null
+    };
   }
 };
 
-export default supabase;
+export const updateProfile = async (userId, updates) => {
+  // Demo users
+  if (userId.includes('demo-')) {
+    const demoAuth = getCurrentAuth();
+    if (demoAuth) {
+      const updatedProfile = { ...demoAuth.profile, ...updates };
+      saveUserData(demoAuth.user, updatedProfile);
+      return { data: updatedProfile, error: null };
+    }
+  }
+  
+  try {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('user_profiles')
+        .update(updates)
+        .eq('user_id', userId)
+        .select()
+        .single(),
+      3000
+    );
+
+    return { data, error };
+  } catch (error) {
+    console.error('❌ Profile update error:', error);
+    return { data: null, error };
+  }
+};

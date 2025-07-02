@@ -2,7 +2,7 @@ import React from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { PackageProvider } from './contexts/PackageContext';
-import { AuthProvider, AuthGuard } from './hooks/useAuth';
+import { AuthGuard } from './hooks/useAuth';
 import AppLayout from './components/Layout/AppLayout';
 import HomePage from './pages/HomePage';
 import MedicalInquiryPage from './pages/MedicalInquiryPage';
@@ -39,113 +39,111 @@ function App() {
     <React.Suspense fallback={<LoadingFallback />}>
       <LanguageProvider>
         <PackageProvider>
-          <AuthProvider>
-            <Router>
-              <Routes>
-                {/* Public route - Login */}
-                <Route path="/login" element={<LoginPage />} />
-                
-                {/* Protected routes - All require authentication */}
-                <Route 
-                  path="/" 
-                  element={
-                    <ProtectedRoute>
-                      <HomePage />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/inquiry" 
-                  element={
-                    <ProtectedRoute>
-                      <MedicalInquiryPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/chat" 
-                  element={
-                    <ProtectedRoute>
-                      <ChatPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/packages" 
-                  element={
-                    <ProtectedRoute>
-                      <PackagesPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/payment" 
-                  element={
-                    <ProtectedRoute>
-                      <PaymentPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/aftercare" 
-                  element={
-                    <ProtectedRoute>
-                      <AftercarePage />
-                    </ProtectedRoute>
-                  } 
-                />
-
-                {/* Admin routes - Require admin or employee role */}
-                <Route 
-                  path="/admin/dashboard" 
-                  element={
-                    <ProtectedRoute roles={['admin', 'employee']}>
-                      <div className="p-8 text-center text-gray-500">
-                        Admin dashboard coming soon...
-                      </div>
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/admin/chat" 
-                  element={
-                    <ProtectedRoute roles={['admin', 'employee']}>
-                      <div className="p-8 text-center text-gray-500">
-                        Admin chat panel coming soon...
-                      </div>
-                    </ProtectedRoute>
-                  } 
-                />
-                
-                <Route 
-                  path="/admin/clients" 
-                  element={
-                    <ProtectedRoute roles={['admin', 'employee']}>
-                      <div className="p-8 text-center text-gray-500">
-                        Client management coming soon...
-                      </div>
-                    </ProtectedRoute>
-                  } 
-                />
-
-                {/* Catch all route - redirect to home */}
-                <Route 
-                  path="*" 
-                  element={
-                    <ProtectedRoute>
-                      <HomePage />
-                    </ProtectedRoute>
-                  } 
-                />
-              </Routes>
-            </Router>
-          </AuthProvider>
+          <Router>
+            <Routes>
+              {/* Public route - Login */}
+              <Route path="/login" element={<LoginPage />} />
+              
+              {/* Protected routes - All require authentication */}
+              <Route 
+                path="/" 
+                element={
+                  <ProtectedRoute>
+                    <HomePage />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/inquiry" 
+                element={
+                  <ProtectedRoute>
+                    <MedicalInquiryPage />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/chat" 
+                element={
+                  <ProtectedRoute>
+                    <ChatPage />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/packages" 
+                element={
+                  <ProtectedRoute>
+                    <PackagesPage />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/payment" 
+                element={
+                  <ProtectedRoute>
+                    <PaymentPage />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              {/* AftercarePage with specific patient role guard (already includes AuthGuard) */}
+              <Route 
+                path="/aftercare" 
+                element={<AftercarePage />}
+              />
+              
+              {/* Admin routes - Require admin or employee role */}
+              <Route 
+                path="/admin/dashboard" 
+                element={
+                  <ProtectedRoute roles={['admin', 'employee']}>
+                    <div className="p-8 text-center">
+                      <h1 className="text-2xl font-bold text-gray-900 mb-4">Admin Dashboard</h1>
+                      <p className="text-gray-600">Admin dashboard coming soon...</p>
+                    </div>
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/admin/chat" 
+                element={
+                  <ProtectedRoute roles={['admin', 'employee']}>
+                    <div className="p-8 text-center">
+                      <h1 className="text-2xl font-bold text-gray-900 mb-4">Admin Chat Panel</h1>
+                      <p className="text-gray-600">Admin chat panel coming soon...</p>
+                    </div>
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/admin/clients" 
+                element={
+                  <ProtectedRoute roles={['admin', 'employee']}>
+                    <div className="p-8 text-center">
+                      <h1 className="text-2xl font-bold text-gray-900 mb-4">Client Management</h1>
+                      <p className="text-gray-600">Client management coming soon...</p>
+                    </div>
+                  </ProtectedRoute>
+                } 
+              />
+              
+              {/* Catch all route - redirect to home */}
+              <Route 
+                path="*" 
+                element={
+                  <ProtectedRoute>
+                    <HomePage />
+                  </ProtectedRoute>
+                } 
+              />
+            </Routes>
+          </Router>
         </PackageProvider>
       </LanguageProvider>
     </React.Suspense>

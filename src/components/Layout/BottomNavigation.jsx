@@ -41,8 +41,8 @@ const BottomNavigation = () => {
               key={item.path}
               onClick={() => navigate(item.path)}
               className={`flex flex-col items-center py-3 px-2 rounded-lg transition-all duration-300 ${
-                isActive 
-                  ? 'text-blue-600 bg-blue-50 scale-105' 
+                isActive
+                  ? 'text-blue-600 bg-blue-50 scale-105'
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
               }`}
             >

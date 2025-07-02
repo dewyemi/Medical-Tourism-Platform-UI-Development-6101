@@ -1,128 +1,118 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { signIn, signUp } from '../lib/supabase';
 import SafeIcon from '../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 
-const { FiUser, FiLock, FiMail, FiEye, FiEyeOff, FiLoader, FiHeart } = FiIcons;
+const { FiMail, FiLock, FiEye, FiEyeOff, FiLoader, FiHeart, FiAlertCircle } = FiIcons;
 
 const LoginPage = () => {
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const { user, login, signup, loading, error, clearError } = useAuth();
+  const [mode, setMode] = useState('login'); // 'login' or 'signup'
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    fullName: '',
-    confirmPassword: ''
+    fullName: ''
   });
+  const [localError, setLocalError] = useState('');
+  const [success, setSuccess] = useState('');
 
   // Redirect if already authenticated
-  React.useEffect(() => {
+  useEffect(() => {
     if (user) {
-      navigate('/');
+      console.log('✅ User authenticated, redirecting...');
+      window.location.hash = '#/';
     }
-  }, [user, navigate]);
+  }, [user]);
+
+  // Clear errors when switching modes
+  useEffect(() => {
+    clearError();
+    setLocalError('');
+    setSuccess('');
+  }, [mode, clearError]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    setError(''); // Clear error when user types
-  };
-
-  const validateForm = () => {
-    if (!formData.email || !formData.password) {
-      setError('Please fill in all required fields');
-      return false;
-    }
-
-    if (!isLogin) {
-      if (!formData.fullName) {
-        setError('Full name is required');
-        return false;
-      }
-      if (formData.password !== formData.confirmPassword) {
-        setError('Passwords do not match');
-        return false;
-      }
-      if (formData.password.length < 6) {
-        setError('Password must be at least 6 characters');
-        return false;
-      }
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formData.email)) {
-      setError('Please enter a valid email address');
-      return false;
-    }
-
-    return true;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    setLocalError('');
+    setSuccess('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!validateForm()) return;
+    if (!formData.email || !formData.password) {
+      setLocalError('Please fill in all fields');
+      return;
+    }
 
-    setLoading(true);
-    setError('');
+    if (mode === 'signup' && !formData.fullName) {
+      setLocalError('Please enter your full name');
+      return;
+    }
+
+    console.log(`🔥 ${mode} attempt:`, formData.email);
 
     try {
-      if (isLogin) {
-        const { data, error } = await signIn(formData.email, formData.password);
-        
-        if (error) {
-          setError(error.message || 'Login failed');
-          return;
-        }
-
-        if (data.user) {
-          // Navigate based on user role (will be determined by profile)
-          navigate('/');
-        }
+      let result;
+      
+      if (mode === 'login') {
+        result = await login(formData.email, formData.password);
       } else {
-        const { data, error } = await signUp(formData.email, formData.password, {
+        result = await signup(formData.email, formData.password, {
           full_name: formData.fullName,
-          role: 'client' // Default role for new signups
+          role: 'client'
         });
+      }
 
-        if (error) {
-          setError(error.message || 'Registration failed');
-          return;
-        }
-
-        if (data.user) {
-          // Account created successfully
-          setError(''); // Clear any errors
-          navigate('/');
-        }
+      if (result.success) {
+        setSuccess(`${mode} successful! Redirecting...`);
+        setTimeout(() => {
+          window.location.hash = '#/';
+        }, 1000);
+      } else {
+        setLocalError(result.error);
       }
     } catch (err) {
-      setError(err.message || 'An unexpected error occurred');
-    } finally {
-      setLoading(false);
+      console.error(`${mode} error:`, err);
+      setLocalError('An unexpected error occurred');
     }
   };
 
-  const toggleMode = () => {
-    setIsLogin(!isLogin);
-    setError('');
-    setFormData({
-      email: '',
-      password: '',
-      fullName: '',
-      confirmPassword: ''
-    });
+  // Demo login functions
+  const demoLogin = async (email, password, role = 'client') => {
+    console.log('🎭 Demo login:', email);
+    
+    // First try to login
+    const loginResult = await login(email, password);
+    
+    if (!loginResult.success) {
+      // If login fails, try to create the demo account
+      console.log('🎭 Creating demo account:', email);
+      const signupResult = await signup(email, password, {
+        full_name: role === 'admin' ? 'Demo Admin' : role === 'employee' ? 'Demo Employee' : 'Demo Client',
+        role: role
+      });
+      
+      if (signupResult.success) {
+        setSuccess('Demo account created and logged in!');
+        setTimeout(() => {
+          window.location.hash = '#/';
+        }, 1000);
+      } else {
+        setLocalError('Failed to create demo account');
+      }
+    } else {
+      setSuccess('Demo login successful!');
+      setTimeout(() => {
+        window.location.hash = '#/';
+      }, 1000);
+    }
   };
+
+  const currentError = localError || error;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50 flex items-center justify-center px-4 py-8">
@@ -144,7 +134,7 @@ const LoginPage = () => {
           </motion.div>
           <h1 className="text-2xl font-bold mb-2">EMIRAFRIK</h1>
           <p className="text-blue-100">
-            {isLogin ? 'Welcome back' : 'Join our medical tourism family'}
+            {mode === 'login' ? 'Welcome back to your medical journey' : 'Join our medical tourism family'}
           </p>
         </div>
 
@@ -152,32 +142,41 @@ const LoginPage = () => {
         <div className="p-8">
           <div className="text-center mb-6">
             <h2 className="text-xl font-bold text-gray-900 mb-2">
-              {isLogin ? 'Sign In' : 'Create Account'}
+              {mode === 'login' ? 'Sign In' : 'Create Account'}
             </h2>
             <p className="text-gray-600 text-sm">
-              {isLogin 
-                ? 'Enter your credentials to access your account' 
-                : 'Fill in your details to get started'
-              }
+              {mode === 'login' ? 'Enter your credentials to continue' : 'Fill in your details to get started'}
             </p>
           </div>
 
-          {error && (
+          {/* Error Display */}
+          {currentError && (
             <motion.div
-              className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg"
+              className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.3 }}
             >
-              <p className="text-red-700 text-sm">{error}</p>
+              <SafeIcon icon={FiAlertCircle} className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <p className="text-red-700 text-sm">{currentError}</p>
+            </motion.div>
+          )}
+
+          {/* Success Display */}
+          {success && (
+            <motion.div
+              className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+            >
+              <p className="text-green-700 text-sm">{success}</p>
             </motion.div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
+            {/* Full Name - Only for signup */}
+            {mode === 'signup' && (
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  <SafeIcon icon={FiUser} className="inline w-4 h-4 mr-2 text-blue-500" />
                   Full Name
                 </label>
                 <input
@@ -185,13 +184,14 @@ const LoginPage = () => {
                   name="fullName"
                   value={formData.fullName}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter your full name"
-                  required={!isLogin}
+                  required
                 />
               </div>
             )}
 
+            {/* Email */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 <SafeIcon icon={FiMail} className="inline w-4 h-4 mr-2 text-blue-500" />
@@ -202,12 +202,13 @@ const LoginPage = () => {
                 name="email"
                 value={formData.email}
                 onChange={handleInputChange}
-                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Enter your email"
                 required
               />
             </div>
 
+            {/* Password */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 <SafeIcon icon={FiLock} className="inline w-4 h-4 mr-2 text-blue-500" />
@@ -219,7 +220,7 @@ const LoginPage = () => {
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
-                  className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  className="w-full px-4 py-3 pr-12 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter your password"
                   required
                 />
@@ -233,24 +234,7 @@ const LoginPage = () => {
               </div>
             </div>
 
-            {!isLogin && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  <SafeIcon icon={FiLock} className="inline w-4 h-4 mr-2 text-blue-500" />
-                  Confirm Password
-                </label>
-                <input
-                  type="password"
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  placeholder="Confirm your password"
-                  required={!isLogin}
-                />
-              </div>
-            )}
-
+            {/* Submit Button */}
             <motion.button
               type="submit"
               disabled={loading}
@@ -261,42 +245,57 @@ const LoginPage = () => {
               {loading ? (
                 <>
                   <SafeIcon icon={FiLoader} className="w-5 h-5 animate-spin" />
-                  <span>{isLogin ? 'Signing In...' : 'Creating Account...'}</span>
+                  <span>{mode === 'login' ? 'Signing In...' : 'Creating Account...'}</span>
                 </>
               ) : (
-                <span>{isLogin ? 'Sign In' : 'Create Account'}</span>
+                <span>{mode === 'login' ? 'Sign In' : 'Create Account'}</span>
               )}
             </motion.button>
           </form>
 
-          {/* Toggle Mode */}
+          {/* Mode Switch */}
           <div className="mt-6 text-center">
             <p className="text-gray-600 text-sm">
-              {isLogin ? "Don't have an account?" : "Already have an account?"}
+              {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
               <button
                 type="button"
-                onClick={toggleMode}
-                className="ml-2 text-blue-600 hover:text-blue-700 font-semibold"
+                onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
+                className="text-blue-600 hover:text-blue-700 font-semibold"
               >
-                {isLogin ? 'Sign Up' : 'Sign In'}
+                {mode === 'login' ? 'Sign Up' : 'Sign In'}
               </button>
             </p>
           </div>
 
-          {/* Demo Credentials */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <h4 className="text-sm font-semibold text-gray-900 mb-2">Demo Credentials:</h4>
-            <div className="text-xs text-gray-600 space-y-1">
-              <div>
-                <strong>Admin:</strong> admin@emirafrik.com / admin123
-              </div>
-              <div>
-                <strong>Employee:</strong> employee@emirafrik.com / employee123
-              </div>
-              <div>
-                <strong>Client:</strong> client@emirafrik.com / client123
-              </div>
+          {/* Demo Accounts */}
+          <div className="mt-6 p-4 bg-blue-50 rounded-xl border border-blue-200">
+            <h4 className="font-semibold text-blue-900 mb-3">🎭 Demo Accounts:</h4>
+            <div className="space-y-2">
+              <button
+                onClick={() => demoLogin('demo.client@test.com', 'password123', 'client')}
+                className="w-full text-left px-3 py-2 bg-white rounded-lg hover:bg-blue-100 transition-colors text-sm"
+                disabled={loading}
+              >
+                <span className="font-medium">👤 Client:</span> demo.client@test.com
+              </button>
+              <button
+                onClick={() => demoLogin('demo.employee@test.com', 'password123', 'employee')}
+                className="w-full text-left px-3 py-2 bg-white rounded-lg hover:bg-blue-100 transition-colors text-sm"
+                disabled={loading}
+              >
+                <span className="font-medium">👨‍⚕️ Employee:</span> demo.employee@test.com
+              </button>
+              <button
+                onClick={() => demoLogin('demo.admin@test.com', 'password123', 'admin')}
+                className="w-full text-left px-3 py-2 bg-white rounded-lg hover:bg-blue-100 transition-colors text-sm"
+                disabled={loading}
+              >
+                <span className="font-medium">👑 Admin:</span> demo.admin@test.com
+              </button>
             </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Click any demo account to auto-login or create your own account!
+            </p>
           </div>
         </div>
       </motion.div>

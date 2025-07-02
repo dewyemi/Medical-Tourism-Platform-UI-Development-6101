@@ -6,7 +6,11 @@ import { useAuth } from '../../hooks/useAuth';
 import SafeIcon from '../../common/SafeIcon';
 import * as FiIcons from 'react-icons/fi';
 
-const { FiHome, FiMessageCircle, FiPackage, FiCreditCard, FiHeart, FiSettings, FiBarChart3, FiUsers, FiFileText, FiLogOut, FiShield } = FiIcons;
+const { 
+  FiHome, FiMessageCircle, FiPackage, FiCreditCard, FiHeart, 
+  FiSettings, FiBarChart3, FiUsers, FiFileText, FiLogOut, 
+  FiShield 
+} = FiIcons;
 
 const Sidebar = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
@@ -106,15 +110,12 @@ const Sidebar = ({ isOpen, onClose }) => {
                       onClose();
                     }}
                     className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${
-                      isActive 
-                        ? 'bg-blue-50 text-blue-600 border border-blue-200' 
+                      isActive
+                        ? 'bg-blue-50 text-blue-600 border border-blue-200'
                         : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                     }`}
                   >
-                    <SafeIcon 
-                      icon={item.icon} 
-                      className={`w-5 h-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} 
-                    />
+                    <SafeIcon icon={item.icon} className={`w-5 h-5 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
                     <span className="font-medium">{item.label}</span>
                   </button>
                 );
